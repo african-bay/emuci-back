@@ -5,23 +5,23 @@ require('dotenv').config();
 
 const app = express();
 
-// CONFIGURATION CORS : Autorise Vercel
+// CONFIGURATION CORS : Accepte votre domaine Vercel et localhost
 app.use(cors({
   origin: ['https://emuci-front.vercel.app', 'http://localhost:3000'],
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type']
 }));
 
 app.use(express.json());
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-// CREER UNE POLICE AVEC VALIDATION
+// --- ROUTES POLICES ---
 app.post('/polices', async (req, res) => {
   const { nom_police, entreprise, date_debut, date_fin, plafond_famille, plafond_individuel } = req.body;
-
-  // Validation Serveur des plafonds
-  if (parseFloat(plafond_famille) < parseFloat(plafond_individuel)) {
-    return res.status(400).json({ error: "Le plafond famille doit être ≥ au plafond individuel." });
+  
+  // Validation de sécurité supplémentaire
+  if (Number(plafond_famille) < Number(plafond_individuel)) {
+    return res.status(400).json({ error: "Le plafond famille doit être supérieur ou égal au plafond individuel." });
   }
 
   try {
@@ -29,12 +29,10 @@ app.post('/polices', async (req, res) => {
                    VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`;
     const result = await pool.query(query, [nom_police, entreprise, date_debut, date_fin, plafond_famille, plafond_individuel]);
     res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// REPORTING FINANCIER
+// --- ROUTE REPORTING ---
 app.get('/reportings/prestataires', async (req, res) => {
   try {
     const query = `
@@ -51,4 +49,4 @@ app.get('/reportings/prestataires', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Serveur DJELI sur port ${PORT}`));
+app.listen(PORT, () => console.log(`Serveur Djeli démarré sur port ${PORT}`));
