@@ -5,15 +5,14 @@ require('dotenv').config();
 
 const app = express();
 
-// CORRECTION CORS : Autorise explicitement votre interface Vercel
+// CORRECTION CORS : Autorise votre URL Vercel spécifiquement
 app.use(cors({
   origin: 'https://emuci-front.vercel.app',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type']
 }));
 
 app.use(express.json());
-
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 // --- ROUTES POLICES ---
@@ -34,23 +33,19 @@ app.post('/polices', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- ROUTES PRESTATAIRES ---
-app.get('/prestataires', async (req, res) => {
+// --- ROUTES PRESTATAIRES & REPORTING ---
+app.get('/reportings/prestataires', async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM prestataires ORDER BY nom_etablissement ASC");
+    const query = `
+      SELECT p.nom_etablissement, p.type_etablissement, 
+      COUNT(d.id) as nombre_actes, COALESCE(SUM(d.montant_total), 0) as ca_total
+      FROM prestataires p
+      LEFT JOIN depenses d ON p.id = d.prestataire_id
+      GROUP BY p.id, p.nom_etablissement, p.type_etablissement`;
+    const result = await pool.query(query);
     res.json(result.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/prestataires', async (req, res) => {
-  const { nom, type, tel, adresse, contact } = req.body;
-  try {
-    const query = `INSERT INTO prestataires (nom_etablissement, type_etablissement, telephone, adresse, nom_contact) 
-                   VALUES ($1, $2, $3, $4, $5) RETURNING *`;
-    const result = await pool.query(query, [nom, type, tel, adresse, contact]);
-    res.json(result.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Serveur prêt sur le port ${PORT}`));
+app.listen(PORT, () => console.log(`Serveur actif sur le port ${PORT}`));
