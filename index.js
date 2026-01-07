@@ -1,87 +1,52 @@
 const express = require('express');
 const cors = require('cors');
-const multer = require('multer');
-const xlsx = require('xlsx');
 const { Pool } = require('pg');
 require('dotenv').config();
 
 const app = express();
-const upload = multer({ dest: 'uploads/' });
-
-// Configuration de la base de données (Supabase)
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
-
 app.use(cors());
 app.use(express.json());
 
-// --- ROUTES ---
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-// 1. Récupérer tous les salariés
+// 1. Lire tous les salariés (Fichier à jour)
 app.get('/salaries', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM salaries ORDER BY created_at DESC');
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    try {
+        const result = await pool.query("SELECT * FROM salaries_complet ORDER BY nom ASC");
+        res.json(result.rows);
+    } catch (err) { res.status(500).json(err.message); }
 });
 
-// 2. Ajouter un salarié (Manuel)
+// 2. Affilier (Ajouter) un nouveau salarié
 app.post('/salaries', async (req, res) => {
-  const { matricule, nom, prenom, salaire_brut, categorie } = req.body;
-  try {
-    const result = await pool.query(
-      'INSERT INTO salaries (matricule, nom, prenom, salaire_brut, categorie) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [matricule, nom, prenom, salaire_brut, categorie]
-    );
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    const { nom, prenom, email, poste, situation_familiale } = req.body;
+    try {
+        const query = "INSERT INTO salaries_complet (nom, prenom, email, poste, situation_familiale) VALUES ($1, $2, $3, $4, $5) RETURNING *";
+        const result = await pool.query(query, [nom, prenom, email, poste, situation_familiale]);
+        res.json(result.rows[0]);
+    } catch (err) { res.status(500).json(err.message); }
 });
 
-// 3. Import Excel / CSV
-app.post('/salaries/import', upload.single('file'), async (req, res) => {
-  try {
-    const workbook = xlsx.readFile(req.file.path);
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = xlsx.utils.sheet_to_json(sheet);
-
-    for (let row of data) {
-      await pool.query(
-        'INSERT INTO salaries (matricule, nom, prenom, salaire_brut, categorie) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (matricule) DO NOTHING',
-        [row.Matricule, row.Nom, row.Prenom, row.Salaire, row.Categorie]
-      );
-    }
-    res.json({ success: true, message: `${data.length} salariés traités.` });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+// 3. Mettre à jour (Situation familiale / Ayants droit)
+app.put('/salaries/:id', async (req, res) => {
+    const { id } = req.params;
+    const { situation_familiale, ayants_droit_noms } = req.body;
+    try {
+        const query = "UPDATE salaries_complet SET situation_familiale = $1, ayants_droit_noms = $2 WHERE id = $3 RETURNING *";
+        const result = await pool.query(query, [situation_familiale, ayants_droit_noms, id]);
+        res.json(result.rows[0]);
+    } catch (err) { res.status(500).json(err.message); }
 });
 
-// 4. Calcul des cotisations (Prime Globale)
-app.get('/cotisations/calcul', async (req, res) => {
-  try {
-    const config = await pool.query('SELECT * FROM police_config LIMIT 1');
-    const countResult = await pool.query('SELECT COUNT(*) FROM salaries WHERE statut = $1', ['ACTIF']);
-    
-    const primeAnnuelle = config.rows[0].prime_globale_annuelle;
-    const effectif = parseInt(countResult.rows[0].count);
-    const parTete = effectif > 0 ? (primeAnnuelle / 12) / effectif : 0;
-
-    res.json({
-      primeAnnuelle,
-      effectif,
-      quotePartIndividuelle: parTete,
-      partPatronale: parTete * config.rows[0].part_patronale_pourcentage
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+// 4. Radier (Sortie du salarié)
+app.patch('/salaries/:id/radier', async (req, res) => {
+    const { id } = req.params;
+    const { date_sortie } = req.body;
+    try {
+        const query = "UPDATE salaries_complet SET statut_contrat = 'Radie', date_sortie = $1 WHERE id = $2 RETURNING *";
+        const result = await pool.query(query, [date_sortie, id]);
+        res.json(result.rows[0]);
+    } catch (err) { res.status(500).json(err.message); }
 });
 
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`Serveur Djeli démarré sur le port ${PORT}`));
+app.listen(process.env.PORT || 3000, () => console.log("Serveur démarré"));
